@@ -1,0 +1,390 @@
+---
+title: "CAJEROS MADRID"
+output: 
+  flexdashboard::flex_dashboard:
+    theme: sandstone
+    orientation: rows
+    vertical_layout: scroll
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+```
+
+PRESENTACIÓN
+================================
+El presente trabajo trata de buscar relaciones entre los cajeros automáticos de Madrid 
+Capital y algunas características sociodemográficas del entorno como son Población y 
+Renta Neta Media.  
+Todos los ficheros se obtienen de páginas Web del Ayuntamiento de Madrid.  
+  
+Pero antes 3 consideraciones:  
+  
+### Fichero de cajeros automáticos
+Es el fichero del que parto. Portal de Datos abiertos del Ayuntamiento de Madrid. Relación 
+de los cajeros automáticos  situados "en línea de fachada con acceso desde la vía publica" y  por lo cual están  obligados a pagar una Tasa. Esto implica que no recoge los que se encuentran en una ubicacíón interior dentro del establecimiento  
+  
+### Consideración del entorno
+Entendemos "entorno" como la "sección censal" de la ubicación del cajero automático.  Podemos decir que es la unidad mínima de la que disponemos de información estadística. La división administrativa de Madrid Capital está formada por "Distrito - Barrio - Sección  Censal""  
+
+### Referencias temporales
+En cada fichero se detalla la fecha de los datos
+
+
+
+CAJEROS {data-navmenu="OBTENCIÓN DE DATOS"}
+=====================================
+--Fichero con los Cajeros de Madrid Capital situados en la vía pública (1.348) y 
+por lo cual están obligados a pagar una tasa.  
+  
+--Fichero de actualización anual. Fecha de incorporación al "catálogo de datos abiertos" el 07-08-2018.  
+  
+Contiene datos del año 2018 (primer campo del fichero) sin especificar una fecha concreta
+
+--Portal de datos abiertos del Ayuntamiento de Madrid [https://datos.madrid.es/portal/site/egob]  
+--Cajeros en vía pública [https://datos.madrid.es/egob/catalogo/300206-1-cajeros-via-publica.xlsx]
+  
+
+-Ordeno el fichero resultante por "dirección", entendida como la unión de "Tipo de la vía + Nombre de la vía + Número de la vía"
+  
+  
+  
+```{r}
+library(readxl)
+library(tidyverse)
+url <- "https://datos.madrid.es/egob/catalogo/300206-1-cajeros-via-publica.xlsx"
+destfile <- "X300206_1_cajeros_via_publica.xlsx"
+curl::curl_download(url, destfile)
+cajeros <- read_excel(destfile)
+cajeros <- cajeros %>% select(7:9)
+names(cajeros) = c("TipoVia", "NomVia", "Numero")
+cajeros$NomVia <- gsub("Q", "Ñ", cajeros$NomVia)
+cajeros$NomVia <- gsub("O''DONNELL", "O'DONNELL", cajeros$NomVia)
+cajeros <- cajeros[order(cajeros$TipoVia, cajeros$NomVia, cajeros$Numero),]
+head(cajeros)
+```
+CALLEJERO {data-navmenu="OBTENCIÓN DE DATOS"}
+=====================================
+--Fichero que contiene todas las direcciones de Madrid. Presenta el listado de viales vigentes (unos 10.000) y portales y/o edificios de la ciudad (unos 200.000), con gran  
+detalle de los mismos.  
+
+--Selecciono los siguientes campos  
+-Dirección -->para poder cruzar  
+-Distrito-Barrio-Sección Censal -->ya que en algunos registros del fichero de Cajeros vienen sin rellenar  
+-Coordenadas geográficas en formato "S.R. ETRS89/WGS8-4"" para poder geolocalizarlas en el mapa de Madrid  
+  
+--Fichero de actualización mensual. Fecha de incorporación al "catálogo de datos abiertos" el 12-03-2014
+
+    
+--Portal de datos abiertos del Ayuntamiento de Madrid [https://datos.madrid.es/portal/site/egob]  
+--Callejero. Información adicional asociada
+[https://datos.madrid.es/egob/catalogo/200075-1-callejero.csv]
+
+Elimino duplicados para quedarme con una Sección Censal para cada "dirección". Esto es debido a duplicados en una misma dirección (portal a, portal b, portal 2...)  
+  
+  
+  
+```{r}
+library(dplyr)
+callejero <- read_delim("https://datos.madrid.es/egob/catalogo/200075-1-callejero.csv", 
+                                  ";", escape_double = FALSE, locale = locale(encoding = "ASCII"), 
+                                  trim_ws = TRUE)
+callejero <- callejero %>% select(3, 5:7, 9, 11, 19:20)
+names(callejero) = c("TipoVia", "NomVia", "Numero", "CodDis", 
+                     "CodBar", "SecCen", "Longitud", "Latitud")
+callejero$Numero <- substring(callejero$Numero, 4,9)
+callejero$CodBar <- substring(callejero$CodBar, 2)
+callejero$NomVia <- gsub("Q", "Ñ", callejero$NomVia)
+callejero$Longitud <- gsub(" ", "", callejero$Longitud)
+callejero$Latitud <- gsub(" ", "", callejero$Latitud)
+callejero$TipoVia <- as.character(callejero$TipoVia)
+callejero$NomVia <- as.character(callejero$NomVia)
+callejero$Longitud<-as.character(callejero$Longitud)
+callejero$Latitud<-as.character(callejero$Latitud)
+callejero <- callejero[order(callejero$TipoVia, callejero$NomVia, callejero$Numero),]
+callejero <- distinct(callejero, TipoVia,NomVia,Numero, .keep_all = TRUE)
+head(callejero)
+```
+RENTA {data-navmenu="OBTENCIÓN DE DATOS"}
+=====================================
+Fichero con la "renta neta media" de los hogares por Tramos y Sección Censal. Indicador
+facilitado por el INE al Ayuntamiento de Madrid, fruto de la colaboración de este con la Agencia Estatal de Administración Tributaria
+
+--Portal web del Ayuntamiento de Madrid [https://www.madrid.es/portal/site/munimadrid]  
+  
+--Renta neta media de los hogares (Urban Audit)
+[https://www.madrid.es/UnidadesDescentralizadas/UDCEstadistica/Nuevaweb/Econom%C3%ADa/Renta/Urban%20Audit/D3300218.xls]  
+  
+--El último fichero disponible es del año 2015  
+  
+--me agrupa la "renta neta media" de los hogares por Tramos (10 en total) 
+
+  
+
+```{r}
+library(tidyr)
+url <- "https://www.madrid.es/UnidadesDescentralizadas/UDCEstadistica/Nuevaweb/Econom%C3%ADa/Renta/Urban%20Audit/D3300218.xls"
+destfile <- "D3300218.xls"
+curl::curl_download(url, destfile)
+secciones <- read_excel(destfile, skip = 7, col_names = c("CodDisSecCen", "CodBar", "Tramo", "Renta"))
+secciones <- secciones[!is.na(secciones$CodBar),]
+secciones$CodBar <- substring(secciones$CodBar, 3)
+secciones <- secciones %>% separate(CodDisSecCen, c("CodDis", "SecCen"), sep = "-")
+secciones <- secciones[order(secciones$CodDis,
+                             secciones$CodBar,
+                             secciones$SecCen),]
+head(secciones)
+```
+POBLACIÓN {data-navmenu="OBTENCIÓN DE DATOS"}
+=====================================
+--Fichero que contiene los datos del Padrón del Ayuntamiento de Madrid. El fichero está desglosado por género y nacionalidad (española o no), por lo que acumulo para obtener la población de cada Sección Censal  
+  
+--Fichero de actualización mensual. Fecha de incorporación al "catálogo de datos abiertos" el 12-03-2014
+
+
+--Portal de datos abiertos del Ayuntamiento de Madrid [https://datos.madrid.es/portal/site/egob]  
+--Padrón Municipal [https://datos.madrid.es/egob/catalogo/200076-1-padron.csv]
+  
+  
+  
+```{r}
+library(plyr)
+padron <- read_delim("https://datos.madrid.es/egob/catalogo/200076-1-padron.csv", 
+                     ";", escape_double = FALSE, locale = locale(encoding = "ASCII"), 
+                     trim_ws = TRUE)
+padron <- padron %>% select(1, 5, 7, 9:12)
+names(padron) = c("CodDis", "CodBar", "SecCen", "EspHH", "EspMM", "ExtHH", "ExtMM") 
+padron$CodDis <- as.numeric(padron$CodDis)
+padron$CodBar <- as.numeric(padron$CodBar)
+padron$SecCen <- as.numeric(padron$SecCen)
+padron[is.na(padron)] <- 0
+padron <- padron[order(padron$CodDis, padron$CodBar, padron$SecCen),]
+
+## Acumulo habitantes por Sección Censal
+padron_acumu <- ddply(padron, .(CodDis, CodBar, SecCen), 
+                      summarize, Poblacion = sum(EspHH, EspMM, ExtHH, ExtMM))
+head(padron_acumu)
+```
+CAJEROS-CALLEJERO {data-navmenu="CRUCES"}
+=====================================
+--A la dirección del Cajero le añado Distrito, Barrio, Sección Censal y las Coordenadas
+Geográficas  
+  
+  
+--Hay unos pocos registros del fichero inicial de Cajeros (y que detallo al final) que no cruzan por uno de estos 2 motivos:  
+
+1 - El "número"" de la vía viene a "0", por lo que no pueden cruzar  
+2 - Otros con todos los datos rellenos y que no aparecen en el fichero del callejero. En alguno de los 2 ficheros la dirección no es correcta
+  
+```{r}
+library(plyr)
+(cajeros_callejero <- inner_join(cajeros, callejero))
+
+(cajeros_callejero_nocruce <- anti_join(cajeros, callejero))
+
+cajeros_callejero <- cajeros_callejero[order(cajeros_callejero$CodDis, 
+                                             cajeros_callejero$CodBar, 
+                                             cajeros_callejero$SecCen),]
+```
+CAJEROS-CALLEJERO-RENTA {data-navmenu="CRUCES"}
+=====================================
+--Al fichero anterior le añado la "renta neta media" de los Hogares a nivel Sección Censal  
+  
+--Hay unos pocos registros del fichero de Cajeros-Callejero (y que detallo al final) que no cruzan por que la combinación de "Distrito-Barrio-Sección Censal" no aparece en el fichero de Renta Neta Media  
+  
+  
+--Posteriormente creo una función para pasar las coordenadas de tipo S.R. ETRS89/WGS84 a decimales y la aplico a las coordenadas del fichero de arrastre añadiendo las columnas de Longitud y Latitud  
+  
+```{r}
+(cajeros_Madrid <- inner_join(cajeros_callejero, secciones))
+
+cajeros_Madrid$CodDis <- as.numeric(cajeros_Madrid$CodDis)
+cajeros_Madrid$CodBar <- as.numeric(cajeros_Madrid$CodBar)
+cajeros_Madrid$SecCen <- as.numeric(cajeros_Madrid$SecCen)
+
+
+cajeros_Madrid <- cajeros_Madrid[order(cajeros_Madrid$CodDis,
+                                       cajeros_Madrid$CodBar,
+                                       cajeros_Madrid$SecCen),]
+cajeros_Madrid<-na.omit(cajeros_Madrid)
+
+(cajeros_Madrid_nocruce <- anti_join(cajeros_callejero, secciones))
+
+##
+geo2dec<-function(c) {
+  z<-sapply( strsplit(c, "[:\'\"]"), as.character )
+  dec<- as.numeric(z[1, ]) + as.numeric(z[2, ])/60 + as.numeric(z[3, ])/3600
+  if (z[1, ]=="N"||z[1, ]=="E") dec else -dec
+}
+##
+cajeros_Madrid$LatitudD <- geo2dec(cajeros_Madrid$Latitud ) * -1
+cajeros_Madrid$LongitudD <- geo2dec(cajeros_Madrid$Longitud)
+```
+CAJEROS-CALLEJERO-RENTA-POBLACIÓN {data-navmenu="CRUCES"}
+=====================================
+Al fichero de arrastre le añado la población de las Secciones Censales  
+  
+```{r}
+(cajeros_Madrid <- inner_join(cajeros_Madrid, padron_acumu))
+
+(cajeros_Madrid_nocruce_bis <- anti_join(cajeros_Madrid, padron_acumu))
+
+```
+GEOLOCALIZACIÓN
+=====================================
+--Cargo el paquete "caRtociudad"" para geolocalizar los Cajeros  
+y "ggmap"" para situarlos en el Mapa  
+  
+--Después marco los límites de las coordenadas con los valores  
+Max y Min de Latitud y Longitud  
+  
+--Fijo el Centro con el punto medio de las Coordenadas y un  
+límite de 20 kms desde este punto  
+
+--Parece bastante evidente que los Cajeros se acumulan en la denominada  
+"almendra central"
+  
+  
+  
+```{r}
+library(caRtociudad)
+library(ggmap)
+## 
+so.lat <- min(cajeros_Madrid$LatitudD)
+so.lon <- min(cajeros_Madrid$LongitudD)
+ne.lat <- max(cajeros_Madrid$LatitudD)
+ne.lon <- max(cajeros_Madrid$LongitudD)
+
+localizaciones <- data.frame(lat = cajeros_Madrid$LatitudD,
+                             lon = cajeros_Madrid$LongitudD)
+## 
+centro <- c(so.lat + (ne.lat - so.lat)/2,
+            so.lon + (ne.lon - so.lon)/2)
+mapa <- cartociudad_get_map(centro, 20)
+ggmap(mapa) + geom_point(aes(x = lon, y = lat), data = localizaciones)
+```
+
+
+
+ACUMULACIÓN  
+======================================================================
+--Acumulo Cajeros por Distrito-Barrio-Sección Censal con el fin de obtener el fichero definitivo de trabajo: Total de Cajeros por Sección Censal  
+
+Selecciono solo los Campos que me interesan
+  
+```{r}
+## Acumulo cajeros por Distrito-Barrio-Sección Censal
+cajeros_acumu <- plyr::count(cajeros_Madrid, c("CodDis", "CodBar", "SecCen"))
+
+## Selecciono la primera ocurrencia por Distrito-Barrio-Sección Censal
+cajeros_Madrid <- distinct(cajeros_Madrid, CodDis,CodBar,SecCen, .keep_all = TRUE)
+
+## Fusiono los ficheros de Cajeros
+(cajeros_Madrid_defi <- inner_join(cajeros_Madrid, cajeros_acumu))
+cajeros_Madrid_defi <- rename(cajeros_Madrid_defi,c("freq" = "Cajeros"))
+cajeros_Madrid_defi <- cajeros_Madrid_defi %>% select(4:6, 9:10, 13:14)
+```
+  
+CAJEROS POR SECCIÓN CENSAL {data-navmenu="GRÁFICOS"}
+=====================================
+--Representación gráfica de la variable cuantitativa discreta "Cajeros",  
+que representa el total de Cajeros por Sección Censal  
+  
+--Vemos que la mayoría de las Secciones cuenta con 1 o a lo sumo 2 Cajeros
+  
+  
+  
+```{r}
+frec.cajeros <- table(cajeros_Madrid_defi$Cajeros)
+##frec.cajeros
+barplot(frec.cajeros, col = "red", 
+        xlab = "Cajeros", ylab = "Total de Secciones",
+        main = "Cajeros por Sección Censal")
+```  
+
+RENTA POR SECCIÓN CENSAL {data-navmenu="GRÁFICOS"}
+=====================================
+--Representación gráfica de la variable categórica ordinal "Renta",  
+que representa la "Renta Neta Media" de los Hogares por Sección Censal  
+  
+--Parece que la tendencia es que haya más Cajeros a mayor nivel de Renta
+  
+  
+  
+```{r}
+frec.renta <- table(cajeros_Madrid_defi$Renta)
+##frec.renta
+barplot(frec.renta, col = "green", 
+        xlab = "Renta", ylab = "Total de Secciones",
+        main = "Renta Neta Media por Sección Censal")
+```
+
+POBLACIÓN POR SECCIÓN CENSAL {data-navmenu="GRÁFICOS"}
+=====================================
+--Representación gráfica de la variable cuantitativa continua "Población",  
+que representa la Población por Sección Censal  
+  
+--La mayor parte de la Población vive en Secciones Censales de entre 1.000 y 2.000 habitantes
+  
+  
+
+```{r}
+hist(cajeros_Madrid_defi$Poblacion, breaks = 30,
+     main = "Población por Sección Censal",
+     xlab = "Población", ylab = "Total de secciones",
+     col = "steelblue")
+```  
+  
+
+POBLACIÓN-CAJEROS
+=====================================
+Row {data-height=500}
+-------------------------------------
+```{r}
+### 
+plot(cajeros_Madrid_defi$Poblacion, cajeros_Madrid_defi$Cajeros,
+     main = "Población y Cajeros por Sección Censal",
+     xlab = "Población", ylab = "Cajeros")
+### 
+lm.Cajeros.Poblacion <- lm(cajeros_Madrid_defi$Cajeros ~ cajeros_Madrid_defi$Poblacion)
+abline(lm.Cajeros.Poblacion, col = "green")  
+summary(lm.Cajeros.Poblacion)
+```  
+Row {data-height=268}
+-------------------------------------  
+### Resumen de la regresión  
+Gráfico de dispersión de las 2 variables numéricas "Cajeros" y "Población".  
+  
+Con un p-valor superior al 0.5 y una medida de la bondad del ajuste (R2) rondando el "0" podemos decir que el modelo dice muy poco acerca de la variable de interés
+  
+RENTA-CAJEROS {data-orientation=columns}
+=====================================     
+Column {data-width=380}
+-------------------------------------
+--Diagrama de caja de la relación entre las variables "número de cajeros" y  
+el nivel de "renta neta media"  
+  
+--No se ven diferencias apreciables entre los diversos niveles de renta 
+
+Column {data-width=644}
+-------------------------------------
+```{r}
+boxplot(cajeros_Madrid_defi$Cajeros ~ cajeros_Madrid_defi$Renta, 
+        col = "pink",
+        main = "Tramos de Renta Neta Media\nsegún la frecuencia de Cajeros",
+        ylab = "Cajeros",
+        border = "purple")
+```  
+
+CONCLUSIÓN
+====================================
+No encuentro una relación significativa entre la presencia de Cajeros y las 
+características sociodemográficas (Población y Renta Neta Media) de la sección censal
+a la que pertenece
+  
+SESSIOINFO
+====================================
+```{r}
+sessionInfo()
+```  
+
